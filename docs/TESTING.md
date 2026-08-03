@@ -59,9 +59,16 @@ It runs on:
 - pull requests;
 - manual workflow dispatch.
 
-The same suite is executed on Ubuntu 24.04 and Windows Server 2022 with Python
-3.10.20. The workflow has read-only repository permissions and cancels older
-runs for the same ref when a newer commit is pushed.
+The same suite is executed on Ubuntu 24.04 and Windows Server 2022 using the
+newest Python 3.10 patch version available to `actions/setup-python` on each
+hosted runner. The workflow prints the resolved interpreter version in its log.
+
+The paper's reference experiment environment remains Python 3.10.20. Lightweight
+CI intentionally targets the Python 3.10 minor series rather than requiring that
+one exact patch build to be available for every hosted operating system.
+
+The workflow has read-only repository permissions and cancels older runs for the
+same ref when a newer commit is pushed.
 
 ## Delimiter policy
 
