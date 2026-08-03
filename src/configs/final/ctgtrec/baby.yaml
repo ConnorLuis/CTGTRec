@@ -5,6 +5,7 @@ learning_rate: 5.0e-4
 n_ui_layers: 5
 
 ct_adj_dir: continuous_time_adj
+ct_raw_adj_file: ct_raw_adj_user_tau0p3.npz
 ct_time_adj_file: ct_adj_user_tau0p3.npz
 
 g3_score_mode: boost
@@ -15,6 +16,5 @@ g3_strict_inter_file: true
 
 reg_weight: 1.0e-3
 dropout: 0.0
-g3_disable_dropout: false
 
 hyper_parameters: []

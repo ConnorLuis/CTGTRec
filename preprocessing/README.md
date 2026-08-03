@@ -174,12 +174,12 @@ weights are summed into the same matrix entry before normalization.
 
 The final-report temporal scales are:
 
-| Dataset | `tau` | Output graph |
-| --- | ---: | --- |
-| Baby | 0.30 | `ct_adj_user_tau0p3.npz` |
-| Sports | 0.10 | `ct_adj_user_tau0p1.npz` |
-| Clothing | 0.50 | `ct_adj_user_tau0p5.npz` |
-| MicroLens | 0.03 | `ct_adj_user_tau0p03.npz` |
+| Dataset | `tau` | Raw weighted graph | Normalized graph |
+| --- | ---: | --- | --- |
+| Baby | 0.30 | `ct_raw_adj_user_tau0p3.npz` | `ct_adj_user_tau0p3.npz` |
+| Sports | 0.10 | `ct_raw_adj_user_tau0p1.npz` | `ct_adj_user_tau0p1.npz` |
+| Clothing | 0.50 | `ct_raw_adj_user_tau0p5.npz` | `ct_adj_user_tau0p5.npz` |
+| MicroLens | 0.03 | `ct_raw_adj_user_tau0p03.npz` | `ct_adj_user_tau0p03.npz` |
 
 Build each final graph with its dataset-specific scale.
 
@@ -230,12 +230,17 @@ For Baby, the generated directory is:
 
 ```text
 data/baby/continuous_time_adj/
+├── ct_raw_adj_user_tau0p3.npz
 ├── ct_adj_user_tau0p3.npz
 ├── ct_adj_stats.csv
 └── ct_adj_manifest.json
 ```
 
 The other datasets use the same directory and filename pattern.
+
+The `ct_raw_adj_user_tau*.npz` file stores unnormalized aggregated temporal
+weights and is required for weighted edge dropout. The `ct_adj_user_tau*.npz`
+file stores the complete symmetric normalization used for evaluation.
 
 `ct_adj_stats.csv` records graph and temporal-weight statistics.
 `ct_adj_manifest.json` records the source interaction file, train/validation/test
@@ -325,6 +330,6 @@ Before training CTGTRec, verify that:
 1. `data/<dataset>/<dataset>_temporal.inter` exists;
 2. every user has exactly one validation and one test interaction;
 3. IDs are contiguous and feature rows align with `itemID`;
-4. the dataset-specific `ct_adj_user_tau*.npz` file exists;
+4. both dataset-specific raw and normalized `tau` graph files exist;
 5. the graph manifest reports `graph_source` as training interactions only;
 6. no validation or test interaction was used to build graph or trend features.
