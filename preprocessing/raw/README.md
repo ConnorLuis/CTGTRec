@@ -27,17 +27,16 @@ terms and citation requirements of the original providers:
 
 ## Dependencies
 
-The interaction, split, metadata and image-alignment stages require:
+After installing the main environment, install the optional raw text-encoding
+dependency set:
 
 ```bash
-pip install numpy pandas
+pip install -r requirements-preprocessing.txt
 ```
 
-Text encoding additionally requires:
-
-```bash
-pip install sentence-transformers
-```
+The interaction, split, metadata, and image-alignment stages themselves use
+NumPy and pandas from `requirements.txt`. Text encoding uses the pinned
+Sentence Transformers package from `requirements-preprocessing.txt`.
 
 ## 1. Build interactions and mappings
 
