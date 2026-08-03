@@ -1,0 +1,27 @@
+cff-version: 1.2.0
+message: "If you use CTGTRec, please cite the software and the accompanying manuscript."
+title: "CTGTRec"
+type: software
+authors:
+  - family-names: "Lv"
+    given-names: "Kangnan"
+repository-code: "https://github.com/ConnorLuis/CTGTRec"
+url: "https://github.com/ConnorLuis/CTGTRec"
+license: "GPL-3.0-only"
+abstract: >-
+  CTGTRec is a temporal multimodal recommendation implementation combining a
+  continuous-time weighted user-item graph, a frozen multimodal item-item
+  graph, and train-only item-trend-aware score calibration.
+keywords:
+  - multimodal recommendation
+  - temporal recommendation
+  - graph recommendation
+  - continuous-time graph
+  - item trend
+preferred-citation:
+  type: generic
+  authors:
+    - family-names: "Lv"
+      given-names: "Kangnan"
+  title: "CTGTRec: Continuous-Time Graph Learning and Item-Trend-Aware Score Calibration for Multimodal Recommendation"
+  year: 2026
