@@ -1,339 +1,312 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-build_temporal_split_inter.py
+Build the strict per-user temporal split used by CTGTRec.
 
-Purpose
+The script reads:
+
+    data/<dataset>/<dataset>.inter
+
+and writes:
+
+    data/<dataset>/<dataset>_temporal.inter
+
+Only ``x_label`` values are regenerated. User IDs, item IDs, ratings, and
+timestamps are not re-indexed or otherwise modified. Output rows are written in
+per-user chronological order.
+
+Split protocol
+--------------
+For each user, interactions are ordered by:
+
+    (timestamp, original_record_order)
+
+The original record order is used only to break exact timestamp ties.
+
+Labels are assigned as follows:
+
+    all earlier interactions    -> train (x_label = 0)
+    second-to-last interaction  -> valid (x_label = 1)
+    last interaction            -> test  (x_label = 2)
+
+CTGTRec uses 5-core datasets, so every user is expected to have at least three
+interactions. The script fails instead of silently applying a different split
+to shorter histories.
+
+Example
 -------
-Re-generate only the x_label column of MMRec-format .inter files using a
-per-user chronological split, while keeping userID / itemID / rating /
-timestamp unchanged. This preserves existing u_id_mapping.csv,
-i_id_mapping.csv, image_feat.npy, text_feat.npy, etc.
-
-Input format
-------------
-userID\titemID\trating\ttimestamp\tx_label
-
-Output format
--------------
-userID\titemID\trating\ttimestamp\tx_label
-
-x_label convention
-------------------
-0 = train, 1 = valid, 2 = test
-
-Recommended first use
----------------------
-# Create new dataset folders data/baby, data/sports, ...
 python preprocessing/build_temporal_split_inter.py \
-  --data_root data \
-  --datasets baby sports clothing microlens \
-  --split_mode leave_one_out \
-  --output_style new_dataset \
-  --copy_side_files
-
-Then rebuild equal-time snapshots and adjacency files on the *_temporal datasets.
+    --data_root data \
+    --datasets baby sports clothing microlens
 """
 
 from __future__ import annotations
 
 import argparse
-import shutil
 from pathlib import Path
-from typing import Iterable, List, Tuple
+from typing import Sequence
 
+import numpy as np
 import pandas as pd
 
+
 REQUIRED_COLS = ["userID", "itemID", "rating", "timestamp", "x_label"]
+ORIGINAL_ORDER_COL = "__original_record_order__"
+
+
+def _coerce_integer_column(df: pd.DataFrame, column: str, path: Path) -> None:
+    """Validate and convert an identifier column to int64 without truncation."""
+    numeric = pd.to_numeric(df[column], errors="raise")
+
+    if numeric.isna().any():
+        raise ValueError(f"{path}: column {column!r} contains missing values.")
+
+    values = numeric.to_numpy(dtype=np.float64)
+    if not np.isfinite(values).all():
+        raise ValueError(f"{path}: column {column!r} contains non-finite values.")
+    if not np.equal(values, np.floor(values)).all():
+        raise ValueError(f"{path}: column {column!r} must contain integer IDs.")
+    if (values < 0).any():
+        raise ValueError(f"{path}: column {column!r} contains negative IDs.")
+
+    df[column] = numeric.astype(np.int64)
 
 
 def read_inter(path: Path) -> pd.DataFrame:
-    if not path.exists():
-        raise FileNotFoundError(f"Input .inter file not found: {path}")
+    """Read and validate an MMRec-format interaction file."""
+    if not path.is_file():
+        raise FileNotFoundError(f"Input interaction file not found: {path}")
 
     df = pd.read_csv(path, sep="\t")
-    missing = [c for c in REQUIRED_COLS if c not in df.columns]
-    if missing:
-        raise ValueError(f"{path} is missing required columns: {missing}. Columns={list(df.columns)}")
 
-    # Keep only the standard columns and preserve their order.
+    missing = [column for column in REQUIRED_COLS if column not in df.columns]
+    if missing:
+        raise ValueError(
+            f"{path}: missing required columns {missing}; "
+            f"available columns are {list(df.columns)}."
+        )
+
     df = df[REQUIRED_COLS].copy()
 
-    # Enforce stable numeric dtypes where possible.
-    df["userID"] = df["userID"].astype(int)
-    df["itemID"] = df["itemID"].astype(int)
-    df["timestamp"] = pd.to_numeric(df["timestamp"], errors="raise")
-    df["x_label"] = df["x_label"].astype(int)
+    if df.empty:
+        raise ValueError(f"{path}: interaction file is empty.")
+    if df[REQUIRED_COLS].isna().any().any():
+        missing_counts = df[REQUIRED_COLS].isna().sum()
+        missing_counts = missing_counts[missing_counts > 0].to_dict()
+        raise ValueError(f"{path}: missing values found: {missing_counts}")
+
+    _coerce_integer_column(df, "userID", path)
+    _coerce_integer_column(df, "itemID", path)
+
+    timestamp = pd.to_numeric(df["timestamp"], errors="raise")
+    timestamp_values = timestamp.to_numpy(dtype=np.float64)
+    if not np.isfinite(timestamp_values).all():
+        raise ValueError(f"{path}: timestamp contains non-finite values.")
+    df["timestamp"] = timestamp
+
     return df
 
 
-def assign_leave_one_out(g: pd.DataFrame) -> pd.DataFrame:
+def build_temporal_split(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Per-user chronological leave-one-out split.
+    Apply the paper's strict per-user chronological leave-one-out split.
 
-    n >= 3: last -> test, second last -> valid, earlier -> train
-    n == 2: last -> test, first -> train
-    n == 1: only train
-
-    For 5-core datasets, n is normally >= 5, so every user gets train/valid/test.
+    Exact timestamp ties are resolved by the row order in the input file.
     """
-    n = len(g)
-    labels = [0] * n
-    if n >= 3:
-        labels[-2] = 1
-        labels[-1] = 2
-    elif n == 2:
-        labels[-1] = 2
-    g = g.copy()
-    g["x_label"] = labels
-    return g
+    work = df.copy()
+    work[ORIGINAL_ORDER_COL] = np.arange(len(work), dtype=np.int64)
 
+    # Do not include itemID as a tie-breaking key. The paper uses the original
+    # record order when timestamps are equal.
+    work = work.sort_values(
+        ["userID", "timestamp", ORIGINAL_ORDER_COL],
+        kind="mergesort",
+    ).reset_index(drop=True)
 
-def assign_ratio(g: pd.DataFrame, train_ratio: float, valid_ratio: float) -> pd.DataFrame:
-    """
-    Per-user chronological ratio split.
-
-    For n >= 3, ensure at least one valid and one test interaction.
-    For n < 3, fall back to the leave-one-out behavior.
-    """
-    n = len(g)
-    if n < 3:
-        return assign_leave_one_out(g)
-
-    train_len = int(n * train_ratio)
-    valid_len = int(n * valid_ratio)
-
-    # Ensure non-empty valid/test and at least one training interaction.
-    train_len = max(1, min(train_len, n - 2))
-    valid_len = max(1, min(valid_len, n - train_len - 1))
-    test_len = n - train_len - valid_len
-    if test_len < 1:
-        test_len = 1
-        if valid_len > 1:
-            valid_len -= 1
-        else:
-            train_len -= 1
-
-    labels = [0] * train_len + [1] * valid_len + [2] * test_len
-    if len(labels) != n:
-        raise RuntimeError(f"Internal split error: len(labels)={len(labels)} != n={n}")
-
-    g = g.copy()
-    g["x_label"] = labels
-    return g
-
-
-def build_temporal_split(
-    df: pd.DataFrame,
-    split_mode: str,
-    train_ratio: float,
-    valid_ratio: float,
-) -> pd.DataFrame:
-    # Stable chronological order inside each user. __orig_order__ is used only to
-    # break exact timestamp ties deterministically.
-    df = df.copy()
-    df["__orig_order__"] = range(len(df))
-    df = df.sort_values(["userID", "timestamp", "itemID", "__orig_order__"]).reset_index(drop=True)
-
-    parts: List[pd.DataFrame] = []
-    for _, g in df.groupby("userID", sort=False):
-        if split_mode == "leave_one_out":
-            parts.append(assign_leave_one_out(g))
-        elif split_mode == "ratio":
-            parts.append(assign_ratio(g, train_ratio=train_ratio, valid_ratio=valid_ratio))
-        else:
-            raise ValueError(f"Unsupported split_mode={split_mode}")
-
-    out = pd.concat(parts, axis=0).sort_values(["userID", "timestamp", "itemID", "__orig_order__"])
-    out = out.drop(columns=["__orig_order__"]).reset_index(drop=True)
-    out["x_label"] = out["x_label"].astype(int)
-    return out[REQUIRED_COLS]
-
-
-def temporal_check(df: pd.DataFrame) -> Tuple[bool, int, int, float]:
-    train = df[df["x_label"] == 0]
-    valid = df[df["x_label"] == 1]
-    test = df[df["x_label"] == 2]
-
-    global_ok = False
-    if len(train) > 0 and len(valid) > 0 and len(test) > 0:
-        global_ok = bool(
-            train["timestamp"].max() <= valid["timestamp"].min()
-            and valid["timestamp"].max() <= test["timestamp"].min()
+    group_sizes = work.groupby("userID", sort=False)["userID"].transform("size")
+    short_mask = group_sizes < 3
+    if short_mask.any():
+        short_users = (
+            work.loc[short_mask, ["userID"]]
+            .drop_duplicates()
+            .head(20)["userID"]
+            .astype(int)
+            .tolist()
+        )
+        total_short_users = int(work.loc[short_mask, "userID"].nunique())
+        raise ValueError(
+            "Strict CTGTRec splitting requires at least three interactions per "
+            f"user, but found {total_short_users} shorter user histories. "
+            f"Example user IDs: {short_users}"
         )
 
-    bad_users = 0
-    checked_users = 0
-    for _, g in df.groupby("userID"):
-        tr = g[g["x_label"] == 0]["timestamp"]
-        va = g[g["x_label"] == 1]["timestamp"]
-        te = g[g["x_label"] == 2]["timestamp"]
-        if len(tr) == 0 or len(va) == 0 or len(te) == 0:
-            continue
-        checked_users += 1
-        if not (tr.max() <= va.min() and va.max() <= te.min()):
-            bad_users += 1
+    position = work.groupby("userID", sort=False).cumcount()
 
-    violation_ratio = bad_users / checked_users if checked_users else 0.0
-    return global_ok, checked_users, bad_users, violation_ratio
+    work["x_label"] = np.int8(0)
+    work.loc[position == group_sizes - 2, "x_label"] = np.int8(1)
+    work.loc[position == group_sizes - 1, "x_label"] = np.int8(2)
+
+    validate_temporal_split(work)
+    return work.drop(columns=[ORIGINAL_ORDER_COL])[REQUIRED_COLS].reset_index(drop=True)
 
 
-def print_stats(name: str, df: pd.DataFrame) -> None:
-    print(f"\n[Dataset] {name}")
-    print(f"Total interactions: {len(df)}")
-    print("Label counts:")
-    print(df["x_label"].value_counts().sort_index().to_string())
+def validate_temporal_split(work: pd.DataFrame) -> None:
+    """Validate label counts, ordering, and temporal boundaries per user."""
+    label_values = set(work["x_label"].astype(int).unique().tolist())
+    if not label_values.issubset({0, 1, 2}):
+        raise RuntimeError(f"Unexpected x_label values: {sorted(label_values)}")
 
-    for label, label_name in [(0, "train"), (1, "valid"), (2, "test")]:
-        part = df[df["x_label"] == label]
-        if len(part) == 0:
-            print(f"{label_name}: EMPTY")
-        else:
-            print(
-                f"{label_name}: count={len(part)}, "
-                f"ts_min={part['timestamp'].min()}, ts_max={part['timestamp'].max()}"
-            )
+    grouped = work.groupby("userID", sort=False)
+    group_sizes = grouped.size()
 
-    global_ok, checked_users, bad_users, ratio = temporal_check(df)
-    print(f"Global temporal split OK: {global_ok}")
-    print(
-        "Per-user temporal check: "
-        f"checked_users={checked_users}, bad_users={bad_users}, violation_ratio={ratio:.6f}"
-    )
-    print(
-        "Note: per-user chronological split usually does NOT require global_ok=True, "
-        "because different users have different time ranges. The key target is "
-        "per-user violation_ratio=0."
+    label_counts = (
+        work.groupby(["userID", "x_label"], sort=False)
+        .size()
+        .unstack(fill_value=0)
+        .reindex(columns=[0, 1, 2], fill_value=0)
     )
 
+    expected_train = group_sizes - 2
+    invalid_counts = (
+        (label_counts[0] != expected_train)
+        | (label_counts[1] != 1)
+        | (label_counts[2] != 1)
+    )
+    if invalid_counts.any():
+        bad_users = invalid_counts[invalid_counts].index[:20].tolist()
+        raise RuntimeError(
+            "Invalid train/valid/test counts after splitting. "
+            f"Example user IDs: {bad_users}"
+        )
 
-def copy_side_files(src_dir: Path, dst_dir: Path, src_inter_name: str) -> None:
-    """Copy side files so *_temporal can be used as an MMRec dataset directory."""
-    dst_dir.mkdir(parents=True, exist_ok=True)
-    skip_suffixes = {".inter"}
-    skip_dir_keywords = {
-        "dynamic_snapshots",
-        "time_interval_snapshots",
-        "__pycache__",
-    }
+    position = grouped.cumcount()
+    repeated_sizes = grouped["userID"].transform("size")
+    expected_labels = np.zeros(len(work), dtype=np.int8)
+    expected_labels[position.to_numpy() == (repeated_sizes.to_numpy() - 2)] = 1
+    expected_labels[position.to_numpy() == (repeated_sizes.to_numpy() - 1)] = 2
 
-    for p in src_dir.iterdir():
-        if p.is_dir():
-            # Do not copy old snapshot directories; they must be rebuilt.
-            if any(k in p.name for k in skip_dir_keywords):
-                continue
-            continue
+    if not np.array_equal(work["x_label"].to_numpy(dtype=np.int8), expected_labels):
+        raise RuntimeError("x_label order is inconsistent with strict leave-one-out.")
 
-        if p.name == src_inter_name:
-            continue
-        if p.suffix in skip_suffixes:
-            continue
+    train_max = work[work["x_label"] == 0].groupby("userID")["timestamp"].max()
+    valid_time = work[work["x_label"] == 1].set_index("userID")["timestamp"]
+    test_time = work[work["x_label"] == 2].set_index("userID")["timestamp"]
 
-        target = dst_dir / p.name
-        if not target.exists():
-            shutil.copy2(p, target)
-
-
-def resolve_paths(data_root: Path, dataset: str, output_style: str) -> Tuple[Path, Path, Path, str]:
-    src_dir = data_root / dataset
-    src_inter = src_dir / f"{dataset}.inter"
-
-    if output_style == "same_dir":
-        dst_dir = src_dir
-        out_dataset_name = dataset
-        dst_inter = dst_dir / f"{dataset}_temporal.inter"
-    elif output_style == "new_dataset":
-        out_dataset_name = f"{dataset}_temporal"
-        dst_dir = data_root / out_dataset_name
-        dst_inter = dst_dir / f"{out_dataset_name}.inter"
-    elif output_style == "overwrite":
-        dst_dir = src_dir
-        out_dataset_name = dataset
-        dst_inter = src_inter
-    else:
-        raise ValueError(f"Unsupported output_style={output_style}")
-
-    return src_inter, dst_dir, dst_inter, out_dataset_name
+    temporal_violation = (train_max > valid_time) | (valid_time > test_time)
+    if temporal_violation.any():
+        bad_users = temporal_violation[temporal_violation].index[:20].tolist()
+        raise RuntimeError(
+            "Per-user temporal order validation failed. "
+            f"Example user IDs: {bad_users}"
+        )
 
 
-def process_dataset(args: argparse.Namespace, dataset: str) -> None:
-    data_root = Path(args.data_root)
-    src_inter, dst_dir, dst_inter, out_dataset_name = resolve_paths(
-        data_root, dataset, args.output_style
+def print_summary(dataset: str, source: Path, output: Path, df: pd.DataFrame) -> None:
+    """Print a concise reproducibility summary."""
+    label_counts = (
+        df["x_label"]
+        .value_counts()
+        .reindex([0, 1, 2], fill_value=0)
+        .astype(int)
+    )
+    tied_rows = int(
+        df.duplicated(subset=["userID", "timestamp"], keep=False).sum()
     )
 
-    print("\n" + "=" * 80)
-    print(f"Input dataset : {dataset}")
-    print(f"Input inter   : {src_inter}")
-    print(f"Output dataset: {out_dataset_name}")
-    print(f"Output inter  : {dst_inter}")
+    print("\n" + "=" * 72)
+    print(f"Dataset          : {dataset}")
+    print(f"Input            : {source}")
+    print(f"Output           : {output}")
+    print(f"Users            : {df['userID'].nunique()}")
+    print(f"Items            : {df['itemID'].nunique()}")
+    print(f"Interactions     : {len(df)}")
+    print(f"Train / Valid / Test: {label_counts[0]} / {label_counts[1]} / {label_counts[2]}")
+    print(f"Rows in timestamp ties: {tied_rows}")
+    print("Temporal check   : passed")
 
-    df = read_inter(src_inter)
-    print_stats(f"{dataset} BEFORE", df)
 
-    if args.verify_only:
-        return
+def process_dataset(
+    data_root: Path,
+    dataset: str,
+    input_suffix: str,
+    output_suffix: str,
+    overwrite: bool,
+) -> Path:
+    """Process one dataset and return the generated file path."""
+    dataset_dir = data_root / dataset
+    source = dataset_dir / f"{dataset}{input_suffix}"
+    output = dataset_dir / f"{dataset}{output_suffix}"
 
-    new_df = build_temporal_split(
-        df,
-        split_mode=args.split_mode,
-        train_ratio=args.train_ratio,
-        valid_ratio=args.valid_ratio,
+    if source.resolve() == output.resolve():
+        raise ValueError("Input and output paths must be different.")
+    if output.exists() and not overwrite:
+        raise FileExistsError(
+            f"Output already exists: {output}. "
+            "Use --overwrite to regenerate it."
+        )
+
+    original = read_inter(source)
+    temporal = build_temporal_split(original)
+
+    output.parent.mkdir(parents=True, exist_ok=True)
+    temporary = output.with_name(output.name + ".tmp")
+    temporal.to_csv(temporary, sep="\t", index=False)
+    temporary.replace(output)
+
+    print_summary(dataset, source, output, temporal)
+    return output
+
+
+def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Regenerate MMRec x_label values using CTGTRec's strict per-user "
+            "chronological leave-one-out protocol."
+        )
     )
-    print_stats(f"{out_dataset_name} AFTER", new_df)
-
-    if args.output_style == "overwrite" and src_inter.exists():
-        backup = src_inter.with_suffix(src_inter.suffix + ".bak")
-        if not backup.exists():
-            shutil.copy2(src_inter, backup)
-            print(f"[Backup] {backup}")
-        else:
-            print(f"[Backup exists] {backup}")
-
-    if args.output_style == "new_dataset" and args.copy_side_files:
-        copy_side_files(src_inter.parent, dst_dir, src_inter.name)
-
-    dst_dir.mkdir(parents=True, exist_ok=True)
-    new_df.to_csv(dst_inter, sep="\t", index=False)
-    print(f"[Saved] {dst_inter}")
-
-
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--data_root", type=str, default="data")
-    parser.add_argument("--datasets", nargs="+", required=True)
     parser.add_argument(
-        "--split_mode",
-        type=str,
-        default="leave_one_out",
-        choices=["leave_one_out", "ratio"],
+        "--data_root",
+        type=Path,
+        default=Path("data"),
+        help="Root directory containing one subdirectory per dataset.",
     )
-    parser.add_argument("--train_ratio", type=float, default=0.8)
-    parser.add_argument("--valid_ratio", type=float, default=0.1)
     parser.add_argument(
-        "--output_style",
-        type=str,
-        default="new_dataset",
-        choices=["new_dataset", "same_dir", "overwrite"],
+        "--datasets",
+        nargs="+",
+        required=True,
+        help="Dataset directory names, e.g. baby sports clothing microlens.",
+    )
+    parser.add_argument(
+        "--input_suffix",
+        default=".inter",
+        help="Input suffix appended to each dataset name (default: .inter).",
+    )
+    parser.add_argument(
+        "--output_suffix",
+        default="_temporal.inter",
         help=(
-            "new_dataset: data/baby -> data/baby/baby.inter; "
-            "same_dir: data/baby/baby.inter; "
-            "overwrite: replace data/baby/baby.inter after creating .bak"
+            "Output suffix appended to each dataset name "
+            "(default: _temporal.inter)."
         ),
     )
     parser.add_argument(
-        "--copy_side_files",
+        "--overwrite",
         action="store_true",
-        help="When output_style=new_dataset, copy npy/csv/pt side files to the new dataset directory.",
+        help="Overwrite an existing derived temporal interaction file.",
     )
-    parser.add_argument("--verify_only", action="store_true")
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
 def main() -> None:
     args = parse_args()
     for dataset in args.datasets:
-        process_dataset(args, dataset)
+        process_dataset(
+            data_root=args.data_root,
+            dataset=dataset,
+            input_suffix=args.input_suffix,
+            output_suffix=args.output_suffix,
+            overwrite=args.overwrite,
+        )
 
 
 if __name__ == "__main__":

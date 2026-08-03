@@ -1,65 +1,66 @@
 # coding: utf-8
-# @email: enoche.chow@gmail.com
+"""Console and file logging for CTGTRec experiments."""
 
-"""
-###############################
-"""
+from __future__ import annotations
 
 import logging
-import os
+from pathlib import Path
+
 from utils.utils import get_local_time
 
 
+def _log_level(state):
+    if state is None:
+        return logging.INFO
+    return {
+        "debug": logging.DEBUG,
+        "info": logging.INFO,
+        "warning": logging.WARNING,
+        "error": logging.ERROR,
+        "critical": logging.CRITICAL,
+    }.get(str(state).lower(), logging.INFO)
+
+
 def init_logger(config):
-    """
-    A logger that can show a message on standard output and write it into the
-    file named `filename` simultaneously.
-    All the message that you want to log MUST be str.
+    """Initialize one root logger anchored to the configured project log path."""
+    log_root = Path(str(config["log_dir"]))
+    log_root.mkdir(parents=True, exist_ok=True)
 
-    Args:
-        config (Config): An instance object of Config, used to record parameter information.
-    """
-    LOGROOT = './log/'
-    dir_name = os.path.dirname(LOGROOT)
-    if not os.path.exists(dir_name):
-        os.makedirs(dir_name)
+    log_filename = "{}-{}-{}.log".format(
+        config["model"],
+        config["dataset"],
+        get_local_time(),
+    )
+    log_path = log_root / log_filename
+    config["log_file"] = str(log_path)
 
-    logfilename = '{}-{}-{}.log'.format(config['model'], config['dataset'], get_local_time())
+    level = _log_level(config["state"])
 
-    logfilepath = os.path.join(LOGROOT, logfilename)
-
-    filefmt = "%(asctime)-15s %(levelname)s %(message)s"
-    filedatefmt = "%a %d %b %Y %H:%M:%S"
-    fileformatter = logging.Formatter(filefmt, filedatefmt)
-
-    sfmt = u"%(asctime)-15s %(levelname)s %(message)s"
-    sdatefmt = "%d %b %H:%M"
-    sformatter = logging.Formatter(sfmt, sdatefmt)
-    if config['state'] is None or config['state'].lower() == 'info':
-        level = logging.INFO
-    elif config['state'].lower() == 'debug':
-        level = logging.DEBUG
-    elif config['state'].lower() == 'error':
-        level = logging.ERROR
-    elif config['state'].lower() == 'warning':
-        level = logging.WARNING
-    elif config['state'].lower() == 'critical':
-        level = logging.CRITICAL
-    else:
-        level = logging.INFO
-    # comment following 3 lines and handlers = [sh, fh] to cancel file dump.
-    fh = logging.FileHandler(logfilepath, 'w', 'utf-8')
-    fh.setLevel(level)
-    fh.setFormatter(fileformatter)
-
-    sh = logging.StreamHandler()
-    sh.setLevel(level)
-    sh.setFormatter(sformatter)
-
-    logging.basicConfig(
-        level=level,
-        #handlers=[sh]
-        handlers = [sh, fh]
+    file_handler = logging.FileHandler(
+        log_path,
+        mode="w",
+        encoding="utf-8",
+    )
+    file_handler.setLevel(level)
+    file_handler.setFormatter(
+        logging.Formatter(
+            "%(asctime)-15s %(levelname)s %(message)s",
+            "%a %d %b %Y %H:%M:%S",
+        )
     )
 
+    stream_handler = logging.StreamHandler()
+    stream_handler.setLevel(level)
+    stream_handler.setFormatter(
+        logging.Formatter(
+            "%(asctime)-15s %(levelname)s %(message)s",
+            "%d %b %H:%M",
+        )
+    )
 
+    # ``force=True`` prevents duplicate handlers in repeated in-process runs.
+    logging.basicConfig(
+        level=level,
+        handlers=[stream_handler, file_handler],
+        force=True,
+    )

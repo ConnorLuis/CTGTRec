@@ -1,0 +1,7 @@
+# Lightweight dependencies for syntax, configuration, and preprocessing tests.
+# Full model training dependencies remain in requirements.txt.
+numpy==2.2.6
+scipy==1.15.3
+pandas==2.3.3
+PyYAML==6.0.3
+pytest==8.4.2

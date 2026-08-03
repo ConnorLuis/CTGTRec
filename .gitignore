@@ -3,6 +3,9 @@ __pycache__/
 *.py[cod]
 *.pyo
 *.pyd
+.pytest_cache/
+.coverage
+htmlcov/
 
 # IDE
 .idea/
@@ -33,6 +36,8 @@ checkpoints/
 saved/
 results/
 logs/
+log/
+recommend_topk/
 runs/
 wandb/
 

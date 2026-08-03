@@ -1,0 +1,16 @@
+# CTGTRec final configuration: Sports
+# Fixed after validation-set model selection; not a search space.
+
+learning_rate: 1.0e-3
+n_ui_layers: 6
+
+ct_raw_graph_file: ct_raw_adj_user_tau0p1.npz
+ct_normalized_graph_file: ct_adj_user_tau0p1.npz
+
+trend_weight: 1.10
+trend_recent_ratio: 0.45
+
+aux_loss_weight: 1.0e-3
+ui_edge_dropout: 0.7
+
+hyper_parameters: []

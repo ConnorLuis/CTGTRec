@@ -1,0 +1,24 @@
+CTGTRec
+Copyright (C) 2026 Kangnan Lv
+
+This repository is a modified work based on the MMRec multimodal
+recommendation toolbox:
+
+    https://github.com/enoche/MMRec
+
+MMRec is distributed under the GNU General Public License version 3.
+CTGTRec retains the GPLv3 license for the combined and modified work.
+
+Prominent modifications made in 2026 include, but are not limited to:
+
+- the CTGTRec continuous-time graph and item-trend-aware model;
+- strict per-user chronological preprocessing;
+- continuous-time weighted graph construction;
+- weighted temporal edge dropout;
+- fixed three-seed validation/test evaluation protocol;
+- dataset-specific final configurations;
+- additional model adapters, reproducibility checks, and documentation;
+- repository-root-independent configuration and command-line execution.
+
+The original copyright and attribution notices in inherited source files
+remain applicable. See LICENSE and THIRD_PARTY_NOTICES.md.
