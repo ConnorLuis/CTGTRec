@@ -1,15 +1,34 @@
-# Data Preprocessing
+# Data preprocessing
 
 This directory contains the preprocessing utilities required to reproduce the
-temporal data protocol and continuous-time user–item graph used by CTGTRec.
+strict temporal data protocol and continuous-time user–item graph used by
+CTGTRec.
 
-The public dataset package already provides re-indexed interactions, ID mapping
-files, and pre-extracted visual/textual features. Therefore, the legacy raw-data
-notebooks are not required for normal reproduction.
+Run all commands from the repository root.
 
-## Required input files
+## Preprocessing routes
 
-After downloading the datasets, place them under `data/`:
+The repository supports two starting points.
+
+### Route A: use the released processed data
+
+Use this route when the downloaded dataset package already contains re-indexed
+interactions, ID mappings, and visual/textual features. Start from
+[Build the strict temporal split](#1-build-the-strict-temporal-split).
+
+### Route B: start from original raw data
+
+Use the command-line scripts under [`preprocessing/raw/`](raw/) to construct
+interactions, mappings, aligned Amazon metadata, and Amazon modality features.
+See [`preprocessing/raw/README.md`](raw/README.md) for the complete raw-data
+workflow and the original dataset sources.
+
+After raw-data preprocessing, return to this document and run the same strict
+temporal split and continuous-time graph construction steps as Route A.
+
+## Required dataset layout
+
+Before temporal splitting, each dataset directory should follow this layout:
 
 ```text
 data/
@@ -20,152 +39,292 @@ data/
 │   ├── i_id_mapping.csv
 │   └── u_id_mapping.csv
 ├── sports/
+│   ├── sports.inter
+│   ├── image_feat.npy
+│   ├── text_feat.npy
+│   ├── i_id_mapping.csv
+│   └── u_id_mapping.csv
 ├── clothing/
+│   ├── clothing.inter
+│   ├── image_feat.npy
+│   ├── text_feat.npy
+│   ├── i_id_mapping.csv
+│   └── u_id_mapping.csv
 └── microlens/
+    ├── microlens.inter
+    ├── image_feat.npy
+    ├── text_feat.npy
+    ├── i_id_mapping.csv
+    └── u_id_mapping.csv
 ```
 
-Each interaction file must contain the following tab-separated columns:
+Each tab-separated interaction file must contain:
 
 ```text
 userID    itemID    rating    timestamp    x_label
 ```
 
-The existing `x_label` values are replaced by the paper's temporal split.
+`userID` and `itemID` must be non-negative, zero-based, and contiguous. Feature
+row `i` must correspond to `itemID == i`.
 
-## Step 1: Build the strict per-user temporal split
+## 1. Build the strict temporal split
 
 Run:
 
 ```bash
 python preprocessing/build_temporal_split_inter.py \
   --data_root data \
-  --datasets baby sports clothing microlens \
-  --output_style new_dataset \
-  --copy_side_files
+  --datasets baby sports clothing microlens
 ```
 
-For each user, interactions are stably ordered by:
+The script reads:
+
+```text
+data/<dataset>/<dataset>.inter
+```
+
+and writes the derived file in the same dataset directory:
+
+```text
+data/<dataset>/<dataset>_temporal.inter
+```
+
+For each user, interactions are ordered by:
 
 ```text
 (timestamp, original_record_order)
 ```
 
-The split is:
+The original record order is used only to break exact timestamp ties. `itemID`
+is not used as a tie-breaking key.
+
+Labels are assigned as follows:
 
 ```text
-last interaction          -> test  (x_label = 2)
-second-to-last interaction -> valid (x_label = 1)
-all earlier interactions   -> train (x_label = 0)
+all earlier interactions    -> train (x_label = 0)
+second-to-last interaction  -> valid (x_label = 1)
+last interaction            -> test  (x_label = 2)
 ```
 
-The command creates:
+CTGTRec uses 5-core datasets, so every user is expected to have at least three
+interactions. The script raises an error rather than silently applying a
+different protocol to shorter histories.
+
+Only `x_label` is regenerated. User IDs, item IDs, ratings, timestamps, mapping
+files, and feature-row alignment are not re-indexed or changed. Output rows are
+written in per-user chronological order.
+
+After this step, the expected layout is:
 
 ```text
 data/
-├── baby_temporal/
+├── baby/
+│   ├── baby.inter
 │   ├── baby_temporal.inter
-│   ├── image_feat.npy
-│   ├── text_feat.npy
-│   ├── i_id_mapping.csv
-│   └── u_id_mapping.csv
-├── sports_temporal/
-├── clothing_temporal/
-└── microlens_temporal/
+│   └── ...
+├── sports/
+│   ├── sports.inter
+│   ├── sports_temporal.inter
+│   └── ...
+├── clothing/
+│   ├── clothing.inter
+│   ├── clothing_temporal.inter
+│   └── ...
+└── microlens/
+    ├── microlens.inter
+    ├── microlens_temporal.inter
+    └── ...
 ```
 
-Only the `x_label` column is regenerated. User IDs, item IDs, ratings,
-timestamps, mappings, and feature-row alignment remain unchanged.
+To regenerate existing temporal files deliberately, add `--overwrite`:
 
-## Step 2: Build continuous-time user–item adjacency matrices
+```bash
+python preprocessing/build_temporal_split_inter.py \
+  --data_root data \
+  --datasets baby sports clothing microlens \
+  --overwrite
+```
 
-CTGTRec uses only training interactions (`x_label = 0`) to construct the
-continuous-time weighted user–item graph.
+## 2. Build continuous-time user–item graphs
 
-For an interaction `(u, i, t)`, the user-normalized temporal distance is:
+CTGTRec constructs each continuous-time graph from training interactions only:
 
 ```text
-delta_ui = (t_last_u - t_ui) / max(t_last_u - t_first_u, epsilon)
+x_label == 0
 ```
 
-The continuous edge weight is:
+For a training interaction `(u, i, t_ui)`, define:
 
 ```text
-w_ui = exp(-delta_ui / tau)
+span_u   = t_last_u - t_first_u
+delta_ui = (t_last_u - t_ui) / max(span_u, epsilon)
+w_ui     = exp(-delta_ui / tau)
 ```
 
-The weighted bipartite adjacency matrix is then symmetrically normalized.
+The timestamps used in `t_first_u`, `t_last_u`, and `span_u` are training
+timestamps only. The resulting weighted undirected bipartite adjacency matrix is
+symmetrically normalized:
 
-Build the final-report graph for each dataset:
+```text
+A_norm = D^(-1/2) A D^(-1/2)
+```
+
+If the same user and item have multiple training interactions, their temporal
+weights are summed into the same matrix entry before normalization.
+
+The final-report temporal scales are:
+
+| Dataset | `tau` | Output graph |
+| --- | ---: | --- |
+| Baby | 0.30 | `ct_adj_user_tau0p3.npz` |
+| Sports | 0.10 | `ct_adj_user_tau0p1.npz` |
+| Clothing | 0.50 | `ct_adj_user_tau0p5.npz` |
+| MicroLens | 0.03 | `ct_adj_user_tau0p03.npz` |
+
+Build each final graph with its dataset-specific scale.
+
+### Baby
 
 ```bash
 python preprocessing/build_continuous_time_adj.py \
   --data_root data \
-  --datasets baby_temporal \
-  --inter_suffix .inter \
-  --modes user \
+  --datasets baby \
   --taus 0.30
+```
 
+### Sports
+
+```bash
 python preprocessing/build_continuous_time_adj.py \
   --data_root data \
-  --datasets sports_temporal \
-  --inter_suffix .inter \
-  --modes user \
+  --datasets sports \
   --taus 0.10
+```
 
+### Clothing
+
+```bash
 python preprocessing/build_continuous_time_adj.py \
   --data_root data \
-  --datasets clothing_temporal \
-  --inter_suffix .inter \
-  --modes user \
+  --datasets clothing \
   --taus 0.50
+```
 
+### MicroLens
+
+```bash
 python preprocessing/build_continuous_time_adj.py \
   --data_root data \
-  --datasets microlens_temporal \
-  --inter_suffix .inter \
-  --modes user \
+  --datasets microlens \
   --taus 0.03
 ```
 
-Expected graph files:
+The default input suffix is `_temporal.inter`. A custom suffix may be supplied
+with `--input_suffix`, but the released CTGTRec pipeline uses the default.
+
+To regenerate graph artifacts deliberately, add `--overwrite`.
+
+## Graph outputs
+
+For Baby, the generated directory is:
 
 ```text
-data/baby_temporal/continuous_time_adj/ct_adj_user_tau0p3.npz
-data/sports_temporal/continuous_time_adj/ct_adj_user_tau0p1.npz
-data/clothing_temporal/continuous_time_adj/ct_adj_user_tau0p5.npz
-data/microlens_temporal/continuous_time_adj/ct_adj_user_tau0p03.npz
+data/baby/continuous_time_adj/
+├── ct_adj_user_tau0p3.npz
+├── ct_adj_stats.csv
+└── ct_adj_manifest.json
 ```
 
-The script also writes a manifest and graph statistics for reproducibility.
+The other datasets use the same directory and filename pattern.
 
-## Train-only rule
+`ct_adj_stats.csv` records graph and temporal-weight statistics.
+`ct_adj_manifest.json` records the source interaction file, train/validation/test
+counts, graph formula, `epsilon`, zero-span user count, duplicate user–item
+policy, feature/mapping checks, and generated graph paths.
+
+For diagnostics, add:
+
+```text
+--save_edge_values
+```
+
+This additionally writes `ct_edge_values.csv`, containing the training edge
+timestamps, user-normalized temporal distances, and temporal weights. This file
+can be large and is not required for training.
+
+The final script does not generate global-time graphs, static comparison graphs,
+timestamp snapshots, or minimum-weight-clipped graphs.
+
+## Train-only and evaluation rules
 
 The following artifacts must be derived from training interactions only:
 
-- the continuous-time user–item graph;
+- continuous-time user–item graph edges and temporal statistics;
 - item temporal trend statistics;
 - model parameters.
 
-Validation and test interactions must not be used to build graph structures or
-trend statistics.
+Validation interactions are used for model selection. Test interactions are
+used only for final evaluation. Validation and test interactions must not be
+used to construct graph edges, graph time ranges, or item trend statistics.
 
-## Files intentionally excluded
+## Validation and failure behavior
 
-The public release does not include legacy notebooks for raw Amazon processing,
-random/ratio splitting, static-time user–item graph fusion, or exploratory
-temporal diagnostics. Those files are not part of the final CTGTRec method and
-can cause the released code to deviate from the paper protocol.
+The preprocessing scripts fail explicitly when they detect conditions that can
+break reproducibility or feature alignment, including:
 
-## Generated files
+- missing or malformed interaction columns;
+- non-integer or negative user/item IDs;
+- non-contiguous zero-based IDs;
+- missing train/validation/test labels;
+- non-finite timestamps;
+- mapping counts inconsistent with interaction IDs;
+- feature row counts inconsistent with the number of items;
+- existing output artifacts without `--overwrite`;
+- non-positive `tau` or `epsilon`;
+- non-symmetric or non-finite generated adjacency matrices.
 
-Dataset files and generated adjacency matrices should not be committed to Git.
-Add the following entries to the repository `.gitignore`:
+Do not bypass these checks by editing generated files manually.
+
+## Raw-data scripts
+
+The public raw-data directory contains:
+
+```text
+preprocessing/raw/
+├── README.md
+├── build_interactions.py
+├── split_interactions.py
+├── reindex_amazon_metadata.py
+└── encode_amazon_features.py
+```
+
+These scripts replace the legacy notebooks. The canonical split implementation
+remains `preprocessing/build_temporal_split_inter.py`; the raw-data
+`split_interactions.py` entry point delegates to that implementation rather than
+maintaining a separate split algorithm.
+
+## Generated artifacts
+
+Dataset contents and generated graph artifacts should not be committed to Git.
+The repository ignore rules should cover at least:
 
 ```gitignore
 data/*
 !data/README.md
 **/continuous_time_adj/
 *.bak
+*.tmp
 .ipynb_checkpoints/
 __pycache__/
 ```
+
+## Reproduction checklist
+
+Before training CTGTRec, verify that:
+
+1. `data/<dataset>/<dataset>_temporal.inter` exists;
+2. every user has exactly one validation and one test interaction;
+3. IDs are contiguous and feature rows align with `itemID`;
+4. the dataset-specific `ct_adj_user_tau*.npz` file exists;
+5. the graph manifest reports `graph_source` as training interactions only;
+6. no validation or test interaction was used to build graph or trend features.
