@@ -1,0 +1,75 @@
+# TimeMM Stage-2 tuning
+# Derived from the completed Stage-1 grid.
+#
+# Stage-1 fixed backbone (selected by the 3-seed mean Valid Recall@20):
+#   tau_age_list       = [2.0, 4.0, 8.0]
+#   num_layers         = 2
+#   routing_temperature= 0.7
+#   knn_k              = 10
+#   mm_image_weight    = 0.1
+#   aux_weight         = 0.0
+#   learning_rate      = 0.0005
+#
+# Stage-2 searches only secondary architectural/regularization parameters.
+# Search size:
+#   2 * 2 * 2 * 2 * 2 * 2 = 64 configurations (seed=999).
+#
+# Run:
+#   python main.py -m TimeMM -d baby
+#
+# After Stage-2:
+#   1. Rank configs by Valid Recall@20, not Test Recall@20.
+#   2. Take the top 3 distinct configs.
+#   3. Fix each config and rerun seeds [999, 2024, 3407].
+#   4. Select the final config by the 3-seed mean Valid Recall@20.
+
+model: TimeMM
+
+# ----------------------------
+# Fixed Stage-1 backbone
+# ----------------------------
+timemm_hidden_size: 64
+timemm_feat_embed_dim: 64
+
+timemm_tau_age_list: [2.0, 4.0, 8.0]
+timemm_num_layers: 1
+timemm_routing_temperature: 1.0
+
+timemm_knn_k: 10
+timemm_mm_image_weight: 0.1
+timemm_n_mm_layers: 1
+
+timemm_aux_weight: 0.0
+
+# ----------------------------
+# Stage-2 search space
+# ----------------------------
+# Whether to include user interaction-gap information in addition to age.
+timemm_use_age: True
+timemm_use_gap: False
+
+# Temporal kernel transformation.
+timemm_transform: 'exp'
+
+# Hidden size of the temporal scale router.
+timemm_routing_hidden: 64
+
+# Temperature of ID / visual / textual modality routing.
+timemm_modality_routing_temperature: 1.0
+
+# Representation dropout.
+timemm_dropout: 0.0
+
+# Gate entropy regularization.
+timemm_reg_weight1: 0.0
+
+# Keep embedding L2 regularization disabled in this stage.
+# It can be checked separately after the best Stage-2 structure is selected.
+timemm_reg_weight2: 0.0
+reg_weight: 0.0
+
+timemm_strict_inter_file: True
+
+# Single-seed search; top configurations must later be verified with 3 seeds.
+
+hyper_parameters: []

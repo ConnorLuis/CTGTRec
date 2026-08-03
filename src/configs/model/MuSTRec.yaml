@@ -1,0 +1,56 @@
+# MuSTRec
+# Hyperparameter-search version for MMRec-compatible MuSTRec.
+#
+# Placement:
+#   src/configs/model/MuSTRec.yaml
+#
+# Run:
+#   python main.py -m MuSTRec -d baby
+#   python main.py -m MuSTRec -d sports
+#   python main.py -m MuSTRec -d clothing
+#   python main.py -m MuSTRec -d microlens
+#
+# Search size:
+#   1 seed × 3 freq_cut × 2 dropout × 2 short_weight × 2 mm_weight × 2 user_embedding
+#   = 48 configs / dataset.
+#
+# After choosing the best config, fix all hyperparameters and rerun with:
+#   seed: [999, 2024, 3407]
+
+model: MuSTRec
+
+mustrec_hidden_size: 64
+mustrec_max_seq_length: 50
+
+mustrec_n_layers: 2
+mustrec_n_heads: 2
+mustrec_inner_size: 256
+mustrec_dropout_prob: [0.1]
+mustrec_layer_norm_eps: 1e-12
+mustrec_initializer_range: 0.02
+
+# Frequency-based short/long preference decomposition
+mustrec_freq_cut_ratio: [0.5]
+mustrec_short_weight: [1.0]
+mustrec_long_weight: 1.0
+
+# Candidate representation: ID + multimodal gated item representation
+mustrec_id_weight: 1.0
+mustrec_mm_weight: [0.5]
+mustrec_use_user_embedding: [False]
+
+# Training
+train_batch_size: 1024
+eval_batch_size: 1024
+learning_rate: 0.001
+reg_weight: 0.0
+
+mustrec_strict_inter_file: True
+
+hyper_parameters: [
+  "mustrec_freq_cut_ratio",
+  "mustrec_dropout_prob",
+  "mustrec_short_weight",
+  "mustrec_mm_weight",
+  "mustrec_use_user_embedding"
+]

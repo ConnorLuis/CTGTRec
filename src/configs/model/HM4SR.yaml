@@ -1,0 +1,66 @@
+# HM4SR
+# Hyperparameter-search version for MMRec-compatible HM4SR.
+#
+# Placement:
+#   src/configs/model/HM4SR.yaml
+#
+# Run:
+#   python main.py -m HM4SR -d baby
+#   python main.py -m HM4SR -d sports
+#   python main.py -m HM4SR -d clothing
+#   python main.py -m HM4SR -d microlens
+#
+# Search size:
+#   1 seed × 3 idcl × 2 dropout × 2 temporal_expert × 2 interval_scale = 24 configs / dataset.
+#
+# After choosing the best config, fix all hyperparameters and rerun with:
+#   seed: [999, 2024, 3407]
+
+model: HM4SR
+
+# Keep 64 first for fair runtime and consistency with other MMRec baselines.
+hm4sr_hidden_size: 64
+hm4sr_max_seq_length: 50
+
+# Transformer sequence encoders
+hm4sr_n_layers: 2
+hm4sr_n_heads: 2
+hm4sr_inner_size: 256
+hm4sr_hidden_dropout_prob: [0.5]
+hm4sr_attn_dropout_prob: [0.2]
+hm4sr_layer_norm_eps: 1e-12
+hm4sr_initializer_range: 0.02
+
+# HM4SR MoE modules
+hm4sr_start_expert_num: 4
+hm4sr_temporal_expert_num: [2]
+hm4sr_interval_scale: [50.0]
+
+# Auxiliary losses
+hm4sr_use_idcl: True
+hm4sr_idcl_weight: [0.05]
+hm4sr_temperature: 0.2
+
+# Keep PCL disabled in this first grid.
+# Your adapter supports PCL, but it is much heavier and can be searched after IDCL is stable.
+hm4sr_use_pcl: False
+hm4sr_pcl_weight: 0.0
+hm4sr_pcl_mask_ratio: 0.3
+hm4sr_phcl_temperature: 1.0
+
+# Training settings
+train_batch_size: 1024
+eval_batch_size: 1024
+learning_rate: 0.001
+reg_weight: 0.0
+
+# Sequence construction
+hm4sr_strict_inter_file: True
+
+hyper_parameters: [
+  "hm4sr_idcl_weight",
+  "hm4sr_hidden_dropout_prob",
+  "hm4sr_attn_dropout_prob",
+  "hm4sr_temporal_expert_num",
+  "hm4sr_interval_scale"
+]

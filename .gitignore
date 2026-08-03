@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# IDE
+.idea/
+.vscode/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Operating system
+.DS_Store
+Thumbs.db
+
+# Local environments
+.venv/
+venv/
+env/
+conda-env/
+
+# Datasets
+data/*
+!data/README.md
+
+# Generated graph files
+**/continuous_time_adj/
+
+# Training outputs
+checkpoints/
+saved/
+results/
+logs/
+runs/
+wandb/
+
+# Model checkpoints
+*.pth
+*.ckpt
+
+# Temporary and backup files
+*.bak
+*.tmp
+*.log
