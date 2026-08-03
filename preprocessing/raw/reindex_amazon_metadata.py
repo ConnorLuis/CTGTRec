@@ -17,11 +17,19 @@ import argparse
 import ast
 import gzip
 import json
+import sys
 from pathlib import Path
 from typing import Any, Iterator, Sequence, TextIO
 
 import numpy as np
 import pandas as pd
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from preprocessing.table_io import read_delimited_table
 
 
 PREFERRED_COLUMNS = [
@@ -102,20 +110,26 @@ def iter_metadata(path: Path, mode: str) -> Iterator[tuple[int, dict]]:
 
 
 def load_item_mapping(path: Path) -> pd.DataFrame:
-    """Read and validate a tab-separated ASIN-to-itemID mapping."""
-    mapping = pd.read_csv(path, sep="\t", dtype={"asin": str})
+    """Read and validate comma CSV or legacy tab-separated item mappings."""
     required = ["asin", "itemID"]
-    missing = [column for column in required if column not in mapping.columns]
-    if missing:
-        raise ValueError(
-            f"{path}: missing columns {missing}; available columns are "
-            f"{list(mapping.columns)}."
-        )
+    mapping, detected_separator = read_delimited_table(
+        path,
+        required_columns=required,
+        dtype={"asin": str},
+    )
     mapping = mapping[required].copy()
     mapping["asin"] = mapping["asin"].astype(str).str.strip()
-    mapping["itemID"] = pd.to_numeric(mapping["itemID"], errors="raise").astype(
-        np.int64
-    )
+
+    numeric = pd.to_numeric(mapping["itemID"], errors="raise")
+    values = numeric.to_numpy(dtype=np.float64)
+    if not np.isfinite(values).all():
+        raise ValueError(f"{path}: itemID contains non-finite values.")
+    if not np.equal(values, np.floor(values)).all():
+        raise ValueError(f"{path}: itemID must contain integer values.")
+    if (values < 0).any():
+        raise ValueError(f"{path}: itemID contains negative values.")
+    mapping["itemID"] = values.astype(np.int64)
+    mapping.attrs["detected_separator"] = detected_separator
     if mapping["asin"].eq("").any():
         raise ValueError(f"{path}: blank ASIN values are not allowed.")
     if mapping["asin"].duplicated().any():

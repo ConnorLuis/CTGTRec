@@ -119,7 +119,9 @@ data/<dataset>/
 └── raw_preprocessing_manifest.json
 ```
 
-The `.inter` file initially has `x_label = 0` for every row.
+The `.inter` file initially has `x_label = 0` for every row. Mapping files are
+written as standard comma-separated CSV. Downstream readers also accept the
+legacy tab-separated mapping format used by earlier notebook exports.
 
 ## 2. Apply the strict CTGTRec temporal split
 

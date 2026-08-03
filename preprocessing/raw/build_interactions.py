@@ -379,8 +379,10 @@ def process(args: argparse.Namespace) -> None:
         )
 
     atomic_write_dataframe(interactions, outputs["interaction"], separator="\t")
-    atomic_write_dataframe(user_mapping, outputs["user_mapping"], separator="\t")
-    atomic_write_dataframe(item_mapping, outputs["item_mapping"], separator="\t")
+    # Mapping files use the delimiter implied by their .csv extension. Readers
+    # remain backward-compatible with legacy tab-separated mapping files.
+    atomic_write_dataframe(user_mapping, outputs["user_mapping"], separator=",")
+    atomic_write_dataframe(item_mapping, outputs["item_mapping"], separator=",")
 
     manifest = {
         "source_type": args.source_type,
@@ -396,6 +398,8 @@ def process(args: argparse.Namespace) -> None:
         "interaction_file": outputs["interaction"].name,
         "user_mapping_file": outputs["user_mapping"].name,
         "item_mapping_file": outputs["item_mapping"].name,
+        "interaction_separator": "tab",
+        "mapping_separator": "comma",
         "x_label_note": (
             "Placeholder zeros only. Run the strict per-user temporal splitter."
         ),

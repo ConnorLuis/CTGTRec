@@ -44,12 +44,20 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import sys
 from pathlib import Path
 from typing import Any, Sequence
 
 import numpy as np
 import pandas as pd
 import scipy.sparse as sp
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from preprocessing.table_io import delimiter_name, read_delimited_table
 
 
 REQUIRED_COLUMNS = ["userID", "itemID", "timestamp", "x_label"]
@@ -178,23 +186,34 @@ def validate_side_files(
         if not path.exists():
             checks[filename] = "not_present"
             continue
-        mapping = pd.read_csv(path, sep="\t")
-        if id_column not in mapping.columns:
+        mapping, detected_separator = read_delimited_table(
+            path,
+            required_columns=[id_column],
+        )
+        numeric = pd.to_numeric(mapping[id_column], errors="raise")
+        values = numeric.to_numpy(dtype=np.float64)
+        if not np.isfinite(values).all():
+            raise ValueError(f"{path}: {id_column} contains non-finite values.")
+        if not np.equal(values, np.floor(values)).all():
+            raise ValueError(f"{path}: {id_column} must contain integer values.")
+        if (values < 0).any():
+            raise ValueError(f"{path}: {id_column} contains negative values.")
+
+        integer_values = values.astype(np.int64)
+        if len(integer_values) != expected_count:
             raise ValueError(
-                f"{path}: expected column {id_column!r}; found "
-                f"{list(mapping.columns)}."
-            )
-        values = pd.to_numeric(mapping[id_column], errors="raise").to_numpy()
-        if len(values) != expected_count:
-            raise ValueError(
-                f"{path}: expected {expected_count} rows, found {len(values)}."
+                f"{path}: expected {expected_count} rows, "
+                f"found {len(integer_values)}."
             )
         if not np.array_equal(
-            np.sort(values.astype(np.int64)),
+            np.sort(integer_values),
             np.arange(expected_count, dtype=np.int64),
         ):
             raise ValueError(f"{path}: {id_column} is not contiguous from zero.")
-        checks[filename] = int(len(values))
+        checks[filename] = {
+            "rows": int(len(integer_values)),
+            "delimiter": delimiter_name(detected_separator),
+        }
 
     for filename in ("image_feat.npy", "text_feat.npy"):
         path = dataset_dir / filename

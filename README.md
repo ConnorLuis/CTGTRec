@@ -1,5 +1,7 @@
 # CTGTRec
 
+[![CI](https://github.com/ConnorLuis/CTGTRec/actions/workflows/ci.yml/badge.svg)](https://github.com/ConnorLuis/CTGTRec/actions/workflows/ci.yml)
+
 Official research implementation of **CTGTRec: Continuous-Time Graph Learning and Item-Trend-Aware Score Calibration for Multimodal Recommendation**.
 
 CTGTRec combines:
@@ -141,6 +143,7 @@ CTGTRec/
 Key documentation:
 
 - [Environment, commands, and output files](docs/RUNNING.md)
+- [Automated tests and continuous integration](docs/TESTING.md)
 - [Dataset download and placement](data/README.md)
 - [Temporal split and continuous-time graph preprocessing](preprocessing/README.md)
 - [Raw Amazon preprocessing](preprocessing/raw/README.md)

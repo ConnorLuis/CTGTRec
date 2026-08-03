@@ -65,7 +65,9 @@ userID    itemID    rating    timestamp    x_label
 ```
 
 `userID` and `itemID` must be non-negative, zero-based, and contiguous. Feature
-row `i` must correspond to `itemID == i`.
+row `i` must correspond to `itemID == i`. Newly generated mapping files are
+comma-separated CSV. The validators also accept legacy tab-separated mapping
+files and record the detected delimiter in the graph manifest.
 
 ## 1. Build the strict temporal split
 
